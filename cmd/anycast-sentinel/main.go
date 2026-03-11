@@ -25,6 +25,8 @@ func main() {
 		runCmd(os.Args[2:])
 	case "install":
 		installCmd(os.Args[2:])
+	case "uninstall":
+		uninstallCmd(os.Args[2:])
 	case "version", "--version", "-V":
 		version.Print()
 	case "help", "--help", "-h":
@@ -117,6 +119,29 @@ func installCmd(args []string) {
 	}
 }
 
+func uninstallCmd(args []string) {
+	fs := pflag.NewFlagSet("uninstall", pflag.ContinueOnError)
+	fs.Usage = func() { usageFor("uninstall") }
+
+	if err := fs.Parse(args); err != nil {
+		if err == pflag.ErrHelp {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+
+	if fs.NArg() != 1 {
+		fmt.Fprintf(os.Stderr, "uninstall: instance name required\n\n")
+		usageFor("uninstall")
+		os.Exit(1)
+	}
+
+	if err := install.UninstallInstance(fs.Arg(0)); err != nil {
+		fmt.Fprintf(os.Stderr, "uninstall error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func usage() {
 	fmt.Print(`anycast-sentinel — health-gated anycast address announcer
 
@@ -124,10 +149,11 @@ Usage:
   anycast-sentinel <subcommand> [flags]
 
 Subcommands:
-  run      Evaluate health checks and manage the anycast address
-  install  Install systemd templates and enable a timer instance
-  version  Show version information
-  help     Show help for a subcommand
+  run        Evaluate health checks and manage the anycast address
+  install    Install systemd templates and enable a timer instance
+  uninstall  Disable a timer instance and remove the template unit files
+  version    Show version information
+  help       Show help for a subcommand
 
 Run 'anycast-sentinel help <subcommand>' for subcommand usage.
 `)
@@ -165,6 +191,23 @@ Flags:
       --interval    Timer firing interval (default: 5s)
       --boot-delay  Delay before first run after boot (default: 30s)
   -h, --help        Show this help
+`)
+	case "uninstall":
+		fmt.Print(`anycast-sentinel uninstall
+
+Disables and stops the named timer instance, then removes the shared
+template unit files and reloads the systemd daemon.
+
+The instance config file (/etc/anycast/<instance>.toml) is not removed.
+
+Usage:
+  anycast-sentinel uninstall <instance>
+
+Arguments:
+  <instance>     Instance name — disables anycast-sentinel@<instance>.timer
+
+Flags:
+  -h, --help     Show this help
 `)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n\n", sub)

@@ -26,8 +26,13 @@ Type=oneshot
 ExecStart={{.ExecPath}} run --config /etc/anycast/%i.toml
 
 # Hardening: only CAP_NET_ADMIN is needed for netlink address management.
-# If command checks require additional privileges, add a drop-in override:
-#   /etc/systemd/system/anycast-sentinel@.service.d/capabilities.conf
+# To relax a directive, create a drop-in at:
+#   /etc/systemd/system/anycast-sentinel@.service.d/override.conf
+#
+# Example: if a command check uses an interpreter (Python, Ruby, etc.) that
+# needs write+execute memory, disable MemoryDenyWriteExecute:
+#   [Service]
+#   MemoryDenyWriteExecute=no
 CapabilityBoundingSet=CAP_NET_ADMIN
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -115,6 +120,42 @@ func writeTemplateIfChanged(path, tmpl string, data tmplData) error {
 
 	fmt.Printf("install: writing %s\n", path)
 	return os.WriteFile(path, rendered, 0644)
+}
+
+// UninstallInstance disables and stops the named timer instance, removes the
+// shared template unit files, and reloads the systemd daemon.
+// The instance config file in /etc/anycast/ is intentionally left in place.
+func UninstallInstance(instance string) error {
+	timer := fmt.Sprintf("anycast-sentinel@%s.timer", instance)
+
+	fmt.Printf("uninstall: disabling %s\n", timer)
+	out, err := exec.Command("systemctl", "disable", "--now", timer).CombinedOutput()
+	if err != nil {
+		// Non-fatal: the unit may already be stopped or never enabled.
+		fmt.Printf("uninstall: note: %s\n", strings.TrimSpace(string(out)))
+	}
+
+	for _, path := range []string{servicePath, timerPath} {
+		if err := removeFileIfExists(path); err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("uninstall: reloading systemd daemon")
+	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
+		return fmt.Errorf("daemon-reload: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+
+	fmt.Printf("uninstall: done (config %s/%s.toml was not removed)\n", configDir, instance)
+	return nil
+}
+
+func removeFileIfExists(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing %s: %w", path, err)
+	}
+	fmt.Printf("uninstall: removed %s\n", path)
+	return nil
 }
 
 func sampleConfig() string {

@@ -12,12 +12,23 @@ import (
 	"github.com/demicloud/anycast-sentinel/internal/systemd"
 )
 
+// stateQuerier is the subset of the systemd client used by Engine.
+// Using an interface here allows the systemd dependency to be substituted
+// in tests without any changes to the public API.
+type stateQuerier interface {
+	ActiveState(ctx context.Context, unit string) (string, error)
+}
+
 type Engine struct {
-	systemd *systemd.Client
+	systemd stateQuerier
 }
 
 func NewEngine(sd *systemd.Client) *Engine {
-	return &Engine{systemd: sd}
+	e := &Engine{}
+	if sd != nil {
+		e.systemd = sd
+	}
+	return e
 }
 
 func (e *Engine) AllHealthy(ctx context.Context, checks []config.HealthCheck) error {
