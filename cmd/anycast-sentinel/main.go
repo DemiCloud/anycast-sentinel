@@ -41,6 +41,10 @@ func main() {
 }
 
 func runCmd(args []string) {
+	if len(args) > 0 && args[0] == "help" {
+		usageFor("run")
+		return
+	}
 	fs := pflag.NewFlagSet("run", pflag.ContinueOnError)
 	fs.Usage = func() { usageFor("run") }
 	flagConfig := fs.StringP("config", "c", "", "Path to configuration file")
@@ -72,6 +76,10 @@ func runCmd(args []string) {
 }
 
 func installCmd(args []string) {
+	if len(args) > 0 && args[0] == "help" {
+		usageFor("install")
+		return
+	}
 	fs := pflag.NewFlagSet("install", pflag.ContinueOnError)
 	fs.Usage = func() { usageFor("install") }
 	flagInterval  := fs.String("interval", "5s", "Timer firing interval (e.g. 5s, 1m)")
