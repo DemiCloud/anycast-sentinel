@@ -23,15 +23,29 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart={{.ExecPath}} --config /etc/anycast/%i.toml
+ExecStart={{.ExecPath}} run --config /etc/anycast/%i.toml
+
+# Hardening: only CAP_NET_ADMIN is needed for netlink address management.
+# If command checks require additional privileges, add a drop-in override:
+#   /etc/systemd/system/anycast-sentinel@.service.d/capabilities.conf
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
 `
 
 var timerTemplate = `[Unit]
 Description=Anycast Sentinel Timer (%i)
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=5s
+OnBootSec={{.BootDelay}}
+OnUnitActiveSec={{.Interval}}
 AccuracySec=1s
 
 [Install]
@@ -39,19 +53,23 @@ WantedBy=timers.target
 `
 
 type tmplData struct {
-	ExecPath string
+	ExecPath  string
+	Interval  string
+	BootDelay string
 }
 
-func InstallInstance(instance, execPath string) error {
+func InstallInstance(instance, execPath, interval, bootDelay string) error {
 	fmt.Printf("install: creating config directory %s\n", configDir)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
 
-	if err := writeTemplateIfChanged(servicePath, serviceTemplate, execPath); err != nil {
+	data := tmplData{ExecPath: execPath, Interval: interval, BootDelay: bootDelay}
+
+	if err := writeTemplateIfChanged(servicePath, serviceTemplate, data); err != nil {
 		return err
 	}
-	if err := writeTemplateIfChanged(timerPath, timerTemplate, execPath); err != nil {
+	if err := writeTemplateIfChanged(timerPath, timerTemplate, data); err != nil {
 		return err
 	}
 
@@ -80,11 +98,11 @@ func InstallInstance(instance, execPath string) error {
 	return nil
 }
 
-func writeTemplateIfChanged(path, tmpl, execPath string) error {
+func writeTemplateIfChanged(path, tmpl string, data tmplData) error {
 	t := template.Must(template.New("unit").Parse(tmpl))
 
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, tmplData{ExecPath: execPath}); err != nil {
+	if err := t.Execute(&buf, data); err != nil {
 		return fmt.Errorf("rendering template: %w", err)
 	}
 	rendered := buf.Bytes()
@@ -104,14 +122,29 @@ func sampleConfig() string {
 dev = "eth0"
 # ip4 = "192.0.2.1"   # IPv4 /32 to announce
 # ip6 = "2001:db8::1" # IPv6 /128 to announce (optional)
-# interval = "5s"     # informational only; execution frequency is controlled by the systemd timer
 
-[logging]
-level = "info"
+# At least one check is required. All checks must pass (AND semantics).
+# Supported types: systemd, tcp, command
 
+# Check that a systemd unit is active
 [[checks]]
-name = "example-service"
+name = "my-service"
 type = "systemd"
-unit = "example.service"
+unit = "my-service.service"
+
+# Check that a TCP port is reachable
+# [[checks]]
+# name = "my-service-port"
+# type = "tcp"
+# host = "127.0.0.1"
+# port = 8080
+# timeout = "500ms"   # optional, default 500ms
+
+# Check that a command exits 0
+# [[checks]]
+# name = "custom-check"
+# type = "command"
+# command = "/usr/local/bin/my-healthcheck.sh"
+# timeout = "5s"      # optional, kills the command if exceeded
 `
 }

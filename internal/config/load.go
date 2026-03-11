@@ -36,13 +36,6 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("general.ip6: invalid IP address %q", cfg.General.IP6)
 	}
 
-	if cfg.General.Interval == "" {
-		cfg.General.Interval = "5s"
-	}
-	if _, err := time.ParseDuration(cfg.General.Interval); err != nil {
-		return nil, fmt.Errorf("invalid interval: %w", err)
-	}
-
 	if len(cfg.Checks) == 0 {
 		return nil, fmt.Errorf("at least one check must be defined")
 	}
@@ -55,6 +48,9 @@ func Load(path string) (*Config, error) {
 			if c.Unit == "" {
 				return nil, fmt.Errorf("check %q: unit is required for systemd checks", c.Name)
 			}
+			if c.Timeout != "" {
+				return nil, fmt.Errorf("check %q: timeout is not applicable to systemd checks", c.Name)
+			}
 		case HealthTCP:
 			if c.Host == "" {
 				return nil, fmt.Errorf("check %q: host is required for tcp checks", c.Name)
@@ -62,9 +58,19 @@ func Load(path string) (*Config, error) {
 			if c.Port == 0 {
 				return nil, fmt.Errorf("check %q: port is required for tcp checks", c.Name)
 			}
+			if c.Timeout != "" {
+				if _, err := time.ParseDuration(c.Timeout); err != nil {
+					return nil, fmt.Errorf("check %q: invalid timeout %q (e.g. \"500ms\", \"5s\")", c.Name, c.Timeout)
+				}
+			}
 		case HealthCommand:
 			if c.Command == "" {
 				return nil, fmt.Errorf("check %q: command is required for command checks", c.Name)
+			}
+			if c.Timeout != "" {
+				if _, err := time.ParseDuration(c.Timeout); err != nil {
+					return nil, fmt.Errorf("check %q: invalid timeout %q (e.g. \"500ms\", \"5s\")", c.Name, c.Timeout)
+				}
 			}
 		case "":
 			return nil, fmt.Errorf("check %q: type is required", c.Name)

@@ -24,10 +24,10 @@ func (e *Engine) AllHealthy(ctx context.Context, checks []config.HealthCheck) er
 	for _, hc := range checks {
 		detail, err := e.checkOne(ctx, &hc)
 		if err != nil {
-			fmt.Printf("check [%s]: %s → failed (%s)\n", hc.Type, hc.Name, detail)
+			fmt.Printf("check [%s]: %q → failed (%s)\n", hc.Type, hc.Name, detail)
 			return fmt.Errorf("healthcheck %q failed: %w", hc.Name, err)
 		}
-		fmt.Printf("check [%s]: %s → passed (%s)\n", hc.Type, hc.Name, detail)
+		fmt.Printf("check [%s]: %q → passed (%s)\n", hc.Type, hc.Name, detail)
 	}
 	return nil
 }
@@ -46,6 +46,9 @@ func (e *Engine) checkOne(ctx context.Context, hc *config.HealthCheck) (string, 
 }
 
 func (e *Engine) checkSystemd(ctx context.Context, hc *config.HealthCheck) (string, error) {
+	if e.systemd == nil {
+		return "no systemd connection", fmt.Errorf("systemd client unavailable")
+	}
 	if hc.Unit == "" {
 		return "missing unit", fmt.Errorf("systemd healthcheck %q missing unit", hc.Name)
 	}
@@ -63,9 +66,11 @@ func (e *Engine) checkTCP(ctx context.Context, hc *config.HealthCheck) (string, 
 	if hc.Host == "" || hc.Port == 0 {
 		return "missing host/port", fmt.Errorf("tcp healthcheck %q missing host/port", hc.Name)
 	}
-	timeout := time.Duration(hc.TimeoutMs) * time.Millisecond
-	if timeout <= 0 {
-		timeout = 500 * time.Millisecond
+	timeout := 500 * time.Millisecond
+	if hc.Timeout != "" {
+		if d, err := time.ParseDuration(hc.Timeout); err == nil {
+			timeout = d
+		}
 	}
 	d := net.Dialer{Timeout: timeout}
 	conn, err := d.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", hc.Host, hc.Port))
@@ -79,6 +84,12 @@ func (e *Engine) checkTCP(ctx context.Context, hc *config.HealthCheck) (string, 
 func (e *Engine) checkCommand(ctx context.Context, hc *config.HealthCheck) (string, error) {
 	if hc.Command == "" {
 		return "missing command", fmt.Errorf("command healthcheck %q missing command", hc.Name)
+	}
+	if hc.Timeout != "" {
+		d, _ := time.ParseDuration(hc.Timeout) // already validated at load time
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", hc.Command)
 	out, err := cmd.CombinedOutput()

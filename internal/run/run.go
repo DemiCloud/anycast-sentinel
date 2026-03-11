@@ -17,31 +17,39 @@ import (
 
 // Execute runs a single one-shot health evaluation and adds/removes the
 // anycast address accordingly. Stateless. AND semantics for all checks.
-func Execute(cfg *config.Config) error {
+// If dryRun is true, route changes are logged but not applied.
+func Execute(cfg *config.Config, dryRun bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	sd, err := systemd.New()
-	if err != nil {
-		return fmt.Errorf("connecting to systemd: %w", err)
+	// Only connect to systemd if the config actually has systemd checks.
+	var sd *systemd.Client
+	for _, c := range cfg.Checks {
+		if c.Type == config.HealthSystemd {
+			var err error
+			sd, err = systemd.New()
+			if err != nil {
+				return fmt.Errorf("connecting to systemd: %w", err)
+			}
+			defer sd.Close()
+			break
+		}
 	}
-	defer sd.Close()
 
 	engine := health.NewEngine(sd)
 
-	// Run all health checks (AND semantics)
 	if err := engine.AllHealthy(ctx, cfg.Checks); err != nil {
-		fmt.Printf("health: failure detected (%v)\n", err)
-		return removeRouteIfPresent(cfg)
+		fmt.Println("health: checks failed")
+		return removeRouteIfPresent(cfg, dryRun)
 	}
 
 	fmt.Println("health: all checks passed")
-	return addRouteIfMissing(cfg)
+	return addRouteIfMissing(cfg, dryRun)
 }
 
 // --- Route decision helpers ---
 
-func addRouteIfMissing(cfg *config.Config) error {
+func addRouteIfMissing(cfg *config.Config, dryRun bool) error {
 	present, err := checkRoute(cfg)
 	if err != nil {
 		return err
@@ -51,11 +59,15 @@ func addRouteIfMissing(cfg *config.Config) error {
 		fmt.Printf("route [%s]: present → keeping\n", target)
 		return nil
 	}
+	if dryRun {
+		fmt.Printf("route [%s]: absent → adding (dry run)\n", target)
+		return nil
+	}
 	fmt.Printf("route [%s]: absent → adding\n", target)
 	return addRoute(cfg)
 }
 
-func removeRouteIfPresent(cfg *config.Config) error {
+func removeRouteIfPresent(cfg *config.Config, dryRun bool) error {
 	present, err := checkRoute(cfg)
 	if err != nil {
 		return err
@@ -63,6 +75,10 @@ func removeRouteIfPresent(cfg *config.Config) error {
 	target := routeTarget(cfg)
 	if !present {
 		fmt.Printf("route [%s]: absent → nothing to do\n", target)
+		return nil
+	}
+	if dryRun {
+		fmt.Printf("route [%s]: present → removing (dry run)\n", target)
 		return nil
 	}
 	fmt.Printf("route [%s]: present → removing\n", target)
