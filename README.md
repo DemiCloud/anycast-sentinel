@@ -10,6 +10,32 @@ the address.
 
 ---
 
+## Table of Contents
+
+- [Features](#features)
+- [Usage](#usage)
+  - [run](#run)
+  - [install](#install)
+  - [uninstall](#uninstall)
+  - [version](#version)
+- [Installation](#installation)
+- [Uninstallation](#uninstallation)
+- [Configuration](#configuration)
+  - [Full example](#full-example)
+  - [[general] fields](#general-fields)
+  - [[[checks]] fields](#checks-fields)
+- [Systemd Units](#systemd-units)
+  - [Service template](#service-template)
+  - [Timer template](#timer-template)
+  - [Drop-in overrides](#drop-in-overrides)
+- [Output](#output)
+- [Operational Notes](#operational-notes)
+- [Building](#building)
+- [Tests](#tests)
+- [License](#license)
+
+---
+
 ## Features
 
 - Stateless one-shot execution — no counters, no state files
