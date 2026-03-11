@@ -24,11 +24,12 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) IsActive(ctx context.Context, unit string) (bool, error) {
+func (c *Client) ActiveState(ctx context.Context, unit string) (string, error) {
 	props, err := c.conn.GetUnitPropertiesContext(ctx, unit)
 	if err != nil {
-		return false, fmt.Errorf("get unit properties: %w", err)
+		return "", fmt.Errorf("get unit properties: %w", err)
 	}
-	active, _ := props["ActiveState"].(string)
-	return active == "active", nil
+	state, _ := props["ActiveState"].(string)
+	return state, nil
 }
+
