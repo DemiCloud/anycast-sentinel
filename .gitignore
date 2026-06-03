@@ -29,3 +29,6 @@ go.work.sum
 *.swp
 *.swo
 .DS_Store
+
+# Local wiki clone (see AGENTS.md for setup)
+.wiki/

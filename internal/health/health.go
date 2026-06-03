@@ -2,8 +2,11 @@ package health
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os/exec"
 	"strings"
 	"time"
@@ -51,6 +54,8 @@ func (e *Engine) checkOne(ctx context.Context, hc *config.HealthCheck) (string, 
 		return e.checkTCP(ctx, hc)
 	case config.HealthCommand:
 		return e.checkCommand(ctx, hc)
+	case config.HealthHTTP:
+		return e.checkHTTP(ctx, hc)
 	default:
 		return "unknown type", fmt.Errorf("unknown healthcheck type: %s", hc.Type)
 	}
@@ -115,4 +120,35 @@ func (e *Engine) checkCommand(ctx context.Context, hc *config.HealthCheck) (stri
 		return detail, fmt.Errorf("command failed: %s", detail)
 	}
 	return "exit 0", nil
+}
+
+func (e *Engine) checkHTTP(ctx context.Context, hc *config.HealthCheck) (string, error) {
+	timeout := 5 * time.Second
+	if hc.Timeout != "" {
+		if d, err := time.ParseDuration(hc.Timeout); err == nil {
+			timeout = d
+		}
+	}
+	transport := &http.Transport{}
+	if hc.InsecureSkipTLS {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- user-configured opt-in
+	}
+	client := &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hc.URL, nil)
+	if err != nil {
+		return err.Error(), err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err.Error(), err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return resp.Status, fmt.Errorf("unexpected status: %s", resp.Status)
+	}
+	return resp.Status, nil
 }

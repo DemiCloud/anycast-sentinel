@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 )
@@ -63,7 +64,15 @@ type tmplData struct {
 	BootDelay string
 }
 
+// validInstance matches names that are safe to use as a systemd instance
+// specifier and as a filename component: alphanumeric, hyphens, underscores,
+// and dots, with a maximum length of 64 characters.
+var validInstance = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
+
 func InstallInstance(instance, execPath, interval, bootDelay string) error {
+	if !validInstance.MatchString(instance) {
+		return fmt.Errorf("invalid instance name %q: must match [a-zA-Z0-9._-]{1,64}", instance)
+	}
 	fmt.Printf("install: creating config directory %s\n", configDir)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
@@ -81,7 +90,7 @@ func InstallInstance(instance, execPath, interval, bootDelay string) error {
 	cfg := filepath.Join(configDir, instance+".toml")
 	if _, err := os.Stat(cfg); os.IsNotExist(err) {
 		fmt.Printf("install: writing sample config %s\n", cfg)
-		if err := os.WriteFile(cfg, []byte(sampleConfig()), 0644); err != nil {
+		if err := os.WriteFile(cfg, []byte(sampleConfig()), 0600); err != nil {
 			return fmt.Errorf("writing sample config: %w", err)
 		}
 	} else {
@@ -126,6 +135,9 @@ func writeTemplateIfChanged(path, tmpl string, data tmplData) error {
 // shared template unit files, and reloads the systemd daemon.
 // The instance config file in /etc/anycast/ is intentionally left in place.
 func UninstallInstance(instance string) error {
+	if !validInstance.MatchString(instance) {
+		return fmt.Errorf("invalid instance name %q: must match [a-zA-Z0-9._-]{1,64}", instance)
+	}
 	timer := fmt.Sprintf("anycast-sentinel@%s.timer", instance)
 
 	fmt.Printf("uninstall: disabling %s\n", timer)
@@ -135,9 +147,43 @@ func UninstallInstance(instance string) error {
 		fmt.Printf("uninstall: note: %s\n", strings.TrimSpace(string(out)))
 	}
 
-	for _, path := range []string{servicePath, timerPath} {
-		if err := removeFileIfExists(path); err != nil {
-			return err
+	// Only remove the shared template unit files when no other instances remain.
+	// `systemctl list-units` reports only loaded/active units; use
+	// `systemctl list-unit-files` to also catch enabled-but-stopped ones.
+	out2, err2 := exec.Command(
+		"systemctl", "list-unit-files", "--plain", "--no-legend",
+		"anycast-sentinel@*.timer",
+	).Output()
+	if err2 == nil {
+		var remaining []string
+		for _, line := range strings.Split(strings.TrimSpace(string(out2)), "\n") {
+			if line == "" {
+				continue
+			}
+			unitName := strings.Fields(line)[0]
+			// Strip the template suffix to get the instance name.
+			bare := strings.TrimPrefix(unitName, "anycast-sentinel@")
+			bare = strings.TrimSuffix(bare, ".timer")
+			if bare != instance {
+				remaining = append(remaining, unitName)
+			}
+		}
+		if len(remaining) > 0 {
+			fmt.Printf("uninstall: other instances still present (%s); keeping shared template files\n",
+				strings.Join(remaining, ", "))
+		} else {
+			for _, path := range []string{servicePath, timerPath} {
+				if err := removeFileIfExists(path); err != nil {
+					return err
+				}
+			}
+		}
+	} else {
+		// If we can't enumerate instances, remove the templates anyway (original behaviour).
+		for _, path := range []string{servicePath, timerPath} {
+			if err := removeFileIfExists(path); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -151,7 +197,11 @@ func UninstallInstance(instance string) error {
 }
 
 func removeFileIfExists(path string) error {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("uninstall: %s not found, skipping\n", path)
+			return nil
+		}
 		return fmt.Errorf("removing %s: %w", path, err)
 	}
 	fmt.Printf("uninstall: removed %s\n", path)
@@ -165,7 +215,7 @@ dev = "eth0"
 # ip6 = "2001:db8::1" # IPv6 /128 to announce (optional)
 
 # At least one check is required. All checks must pass (AND semantics).
-# Supported types: systemd, tcp, command
+# Supported types: systemd, tcp, command, http
 
 # Check that a systemd unit is active
 [[checks]]

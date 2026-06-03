@@ -23,6 +23,10 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		runCmd(os.Args[2:])
+	case "validate":
+		validateCmd(os.Args[2:])
+	case "status":
+		statusCmd(os.Args[2:])
 	case "install":
 		installCmd(os.Args[2:])
 	case "uninstall":
@@ -69,6 +73,62 @@ func runCmd(args []string) {
 
 	if err := run.Execute(cfg, *flagDryRun); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func validateCmd(args []string) {
+	fs := pflag.NewFlagSet("validate", pflag.ContinueOnError)
+	fs.Usage = func() { usageFor("validate") }
+	flagConfig := fs.StringP("config", "c", "", "Path to configuration file")
+
+	if err := fs.Parse(args); err != nil {
+		if err == pflag.ErrHelp {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+
+	if *flagConfig == "" {
+		fmt.Fprintf(os.Stderr, "validate: --config is required\n\n")
+		usageFor("validate")
+		os.Exit(1)
+	}
+
+	if _, err := config.Load(*flagConfig); err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("config: valid")
+}
+
+func statusCmd(args []string) {
+	fs := pflag.NewFlagSet("status", pflag.ContinueOnError)
+	fs.Usage = func() { usageFor("status") }
+	flagConfig := fs.StringP("config", "c", "", "Path to configuration file")
+
+	if err := fs.Parse(args); err != nil {
+		if err == pflag.ErrHelp {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	}
+
+	if *flagConfig == "" {
+		fmt.Fprintf(os.Stderr, "status: --config is required\n\n")
+		usageFor("status")
+		os.Exit(1)
+	}
+
+	cfg, err := config.Load(*flagConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := run.Status(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "status: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -150,6 +210,8 @@ Usage:
 
 Subcommands:
   run        Evaluate health checks and manage the anycast address
+  validate   Check a config file for errors (no root or network access needed)
+  status     Report whether configured addresses are present on the interface
   install    Install systemd templates and enable a timer instance
   uninstall  Disable a timer instance and remove the template unit files
   version    Show version information
@@ -161,6 +223,33 @@ Run 'anycast-sentinel help <subcommand>' for subcommand usage.
 
 func usageFor(sub string) {
 	switch sub {
+	case "validate":
+		fmt.Print(`anycast-sentinel validate
+
+Checks a configuration file for errors without requiring root privileges,
+network access, or a running systemd. Exits 0 if the config is valid.
+
+Usage:
+  anycast-sentinel validate --config <path>
+
+Flags:
+  -c, --config    Path to configuration file (required)
+  -h, --help      Show this help
+`)
+	case "status":
+		fmt.Print(`anycast-sentinel status
+
+Reports whether each configured anycast address is currently present on
+the interface. No health checks are evaluated and no route changes are made.
+Exits 0 if all addresses are present, 1 if any are absent.
+
+Usage:
+  anycast-sentinel status --config <path>
+
+Flags:
+  -c, --config    Path to configuration file (required)
+  -h, --help      Show this help
+`)
 	case "run":
 		fmt.Print(`anycast-sentinel run
 

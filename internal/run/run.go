@@ -19,7 +19,13 @@ import (
 // anycast address accordingly. Stateless. AND semantics for all checks.
 // If dryRun is true, route changes are logged but not applied.
 func Execute(cfg *config.Config, dryRun bool) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	globalTimeout := 30 * time.Second
+	if cfg.General.Timeout != "" {
+		if d, err := time.ParseDuration(cfg.General.Timeout); err == nil {
+			globalTimeout = d
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), globalTimeout)
 	defer cancel()
 
 	// Only connect to systemd if the config actually has systemd checks.
@@ -205,8 +211,8 @@ func parseAddr(ipStr string, bits int) (*netlink.Addr, error) {
 	}
 
 	var ipNet *net.IPNet
-	if ip.To4() != nil {
-		ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, 32)}
+	if ip4 := ip.To4(); ip4 != nil {
+		ipNet = &net.IPNet{IP: ip4, Mask: net.CIDRMask(bits, 32)}
 	} else {
 		ipNet = &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, 128)}
 	}
@@ -237,5 +243,57 @@ func isExists(err error) bool {
 }
 
 func isNotFound(err error) bool {
-	return errors.Is(err, syscall.EADDRNOTAVAIL) || errors.Is(err, syscall.ESRCH)
+	return errors.Is(err, syscall.EADDRNOTAVAIL)
+}
+
+// Status reports whether each configured anycast address is currently present on the interface.
+// Each address is reported individually. Returns an error if any address is absent, which
+// also causes a non-zero exit code when called from the status subcommand.
+// No health checks are evaluated and no route changes are made.
+func Status(cfg *config.Config) error {
+	link, err := netlink.LinkByName(cfg.General.Dev)
+	if err != nil {
+		return fmt.Errorf("link %s: %w", cfg.General.Dev, err)
+	}
+
+	allPresent := true
+
+	if cfg.General.IP4 != "" {
+		addr, err := parseAddr(cfg.General.IP4, 32)
+		if err != nil {
+			return err
+		}
+		ok, err := addrOnLink(link, addr)
+		if err != nil {
+			return err
+		}
+		if ok {
+			fmt.Printf("route [%s/%s]: present\n", cfg.General.Dev, cfg.General.IP4)
+		} else {
+			fmt.Printf("route [%s/%s]: absent\n", cfg.General.Dev, cfg.General.IP4)
+			allPresent = false
+		}
+	}
+
+	if cfg.General.IP6 != "" {
+		addr, err := parseAddr(cfg.General.IP6, 128)
+		if err != nil {
+			return err
+		}
+		ok, err := addrOnLink(link, addr)
+		if err != nil {
+			return err
+		}
+		if ok {
+			fmt.Printf("route [%s/%s]: present\n", cfg.General.Dev, cfg.General.IP6)
+		} else {
+			fmt.Printf("route [%s/%s]: absent\n", cfg.General.Dev, cfg.General.IP6)
+			allPresent = false
+		}
+	}
+
+	if !allPresent {
+		return fmt.Errorf("one or more addresses absent from %s", cfg.General.Dev)
+	}
+	return nil
 }
