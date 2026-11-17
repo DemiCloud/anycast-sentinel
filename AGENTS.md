@@ -4,6 +4,23 @@ This file documents conventions for AI coding agents working in this repository.
 
 ---
 
+## Privacy in Documentation & Examples
+
+Never use a real name, username, or email in examples, docs, comments, or sample
+output — use invented/placeholder values instead:
+
+- Project/application names in paths are fine (e.g. `/opt/<app>`), but any path
+  that includes a personal username must use a placeholder or variable instead
+  of a real one, e.g. `/home/${user}/.config/<app>/config.toml`.
+- Sample hosts/IPs in the wiki, README, or config examples must use
+  documentation-only values — `example.com`, `host01.example.com`, and IPs from
+  the reserved documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`,
+  `203.0.113.0/24`), as already done for the `route`/`check` examples below.
+- People: use invented names (`alice`, `Jane Doe`) for any sample owner/contact
+  field.
+
+---
+
 ## Wiki
 
 The project wiki lives in `.wiki/` and is published to the
